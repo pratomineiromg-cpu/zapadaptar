@@ -36,6 +36,7 @@ import { FUNNEL_STAGES } from '../utils/mockData';
 
 interface WhatsAppViewProps {
   clients: Client[];
+  history: HistoryEvent[];
   messages: Record<string, Message[]>;
   onSendMessage: (clientId: string, text: string, type?: 'text' | 'image' | 'audio' | 'file', fileName?: string) => void;
   onUpdateClient: (updated: Client) => void;
@@ -54,6 +55,7 @@ const TEMPLATES = [
 
 export default function WhatsAppView({
   clients,
+  history,
   messages,
   onSendMessage,
   onUpdateClient,
@@ -513,7 +515,6 @@ export default function WhatsAppView({
 
                         <div className="flex items-center justify-end gap-1 mt-1.5 text-[9px] text-slate-400 font-mono select-none">
                           <span>{msg.timestamp}</span>
-                          {isUser && <CheckCheck className="w-3.2 h-3.2 text-blue-400 shrink-0" />}
                         </div>
                       </div>
                     </div>
@@ -688,7 +689,7 @@ export default function WhatsAppView({
                         className="bg-emerald-500 hover:bg-emerald-600 font-bold text-white px-5 rounded-xl flex items-center justify-center gap-1 shrink-0 shadow-md shadow-emerald-500/10 active:scale-95 transition-all"
                       >
                         <Send className="w-4.5 h-4.5" />
-                        <span className="hidden sm:inline text-xs">Enviar</span>
+                        <span className="hidden sm:inline text-xs">Salvar rascunho</span>
                       </button>
                     </form>
                   </>
@@ -890,29 +891,9 @@ export default function WhatsAppView({
               <div className="space-y-3.5">
                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Histórico de Eventos</span>
                 
-                {/* We will render dynamic log events or simple checklist */}
-                <div className="relative pl-3 border-l-2 border-emerald-500/30 space-y-4">
-                  <div className="space-y-1 relative">
-                    <div className="absolute -left-[16px] top-1.5 w-2 h-2 rounded-full bg-emerald-500 border border-white dark:border-slate-900" />
-                    <span className="text-[10px] font-mono text-slate-400">26/05/2026 às 14:26</span>
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Mensagem Enviada</p>
-                    <p className="text-[11px] text-slate-500">Respondido catálogo de preços e frete motoboy.</p>
-                  </div>
-
-                  <div className="space-y-1 relative">
-                    <div className="absolute -left-[16px] top-1.5 w-2 h-2 rounded-full bg-indigo-500 border border-white dark:border-slate-900" />
-                    <span className="text-[10px] font-mono text-slate-400">26/05/2026 às 14:22</span>
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Funil Comercial Atualizado</p>
-                    <p className="text-[11px] text-slate-500">Movido de "Lead" para "Em Atendimento"</p>
-                  </div>
-
-                  <div className="space-y-1 relative">
-                    <div className="absolute -left-[16px] top-1.5 w-2 h-2 rounded-full bg-slate-400 border border-white dark:border-slate-900" />
-                    <span className="text-[10px] font-mono text-slate-400">26/05/2026 às 14:20</span>
-                    <p className="text-xs font-bold text-slate-800 dark:text-slate-200">Contato Identificado</p>
-                    <p className="text-[11px] text-slate-500">Mensagem recebida do cliente no WhatsApp.</p>
-                  </div>
-                </div>
+                {history.filter(event=>event.clientId===selectedClient.id).sort((a,b)=>b.timestamp.localeCompare(a.timestamp)).map(event=><article key={event.id}>
+                  <small>{new Date(event.timestamp).toLocaleString('pt-BR')}</small><p>{event.title}</p><p>{event.description}</p></article>)}
+                {!history.some(event=>event.clientId===selectedClient.id) && <p>Sem eventos registrados.</p>}
               </div>
             )}
           </div>

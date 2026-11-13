@@ -10,7 +10,6 @@ import { AppSettings } from '../types';
 interface ConfiguracoesViewProps {
   settings: AppSettings;
   onUpdateSettings: (s: Partial<AppSettings>) => void;
-  onResetDatabase: () => void;
 }
 
 const parseList = (value: string) =>
@@ -24,7 +23,6 @@ const listToText = (items?: string[]) => (items || []).join('\n');
 export default function ConfiguracoesView({
   settings,
   onUpdateSettings,
-  onResetDatabase,
 }: ConfiguracoesViewProps) {
   const [restaurant, setRestaurant] = useState(settings.restaurant);
   const [operation, setOperation] = useState(settings.operation);
@@ -44,7 +42,7 @@ export default function ConfiguracoesView({
     listToText(settings.whatsapp.quickTemplates)
   );
 
-  const handleSaveConfigsSubmit = (e: React.FormEvent) => {
+  const handleSaveConfigsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const nextDelivery = {
@@ -60,7 +58,7 @@ export default function ConfiguracoesView({
       quickTemplates: parseList(quickTemplatesText),
     };
 
-    onUpdateSettings({
+    try { await onUpdateSettings({
       restaurant,
       operation,
       delivery: nextDelivery,
@@ -78,15 +76,10 @@ export default function ConfiguracoesView({
       operatorName: ui.operatorName,
       theme: ui.theme,
     });
-    alert('Configurações salvas e aplicadas em tempo real na operação!');
+    alert('Configurações salvas.'); } catch(e) { alert(e instanceof Error ? e.message : 'Não foi possível salvar.'); }
   };
 
-  const handleFactoryResetWithAlert = () => {
-    if (confirm('Aviso Crítico: deseja redefinir os dados locais para o padrão inicial? Suas modificações de chat serão limpas.')) {
-      onResetDatabase();
-      alert('Banco de dados local redefinido com sucesso!');
-    }
-  };
+
 
   const inputClass = 'w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-705 rounded-xl p-2.5 text-xs text-slate-800 dark:text-slate-100 font-mono focus:outline-none';
   const labelClass = 'block text-slate-450 font-bold mb-1.5 uppercase text-[9px]';
@@ -386,22 +379,6 @@ export default function ConfiguracoesView({
             </div>
           </section>
 
-          <section className={cardClass}>
-            <h3 className="text-xs font-bold text-slate-400 tracking-wider uppercase text-rose-500">Área Perigosa</h3>
-            <div className="space-y-3">
-              <p className="text-[11px] text-slate-500">
-                Se os dados locais estiverem cheios ou você quiser reiniciar a operação, clique no controle abaixo para restaurar os valores iniciais.
-              </p>
-              <button
-                type="button"
-                onClick={handleFactoryResetWithAlert}
-                className="w-full bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/20 text-rose-600 dark:text-rose-450 border border-rose-200 dark:border-rose-900 font-bold py-2 px-3 rounded-xl transition inline-flex items-center justify-center gap-1.5"
-              >
-                <RefreshCw className="w-3.5 h-3.5 animate-spin-reverse" />
-                <span>REDEFINIR DADOS LOCAIS</span>
-              </button>
-            </div>
-          </section>
 
           <button
             type="submit"

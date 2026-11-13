@@ -33,6 +33,7 @@ import {
 import { AppSettings } from '../types';
 
 interface SidebarProps {
+  permitted: (tab:string) => boolean;
   currentTab: string;
   onChangeTab: (tab: string) => void;
   settings: AppSettings;
@@ -43,6 +44,7 @@ interface SidebarProps {
 
 export default function Sidebar({
   currentTab,
+  permitted,
   onChangeTab,
   settings,
   pipelineValue,
@@ -52,11 +54,11 @@ export default function Sidebar({
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, color: 'text-sky-500' },
     { id: 'caixa', label: 'Caixa e PDV', icon: DollarSign, color: 'text-emerald-500' },
-    { id: 'whatsapp', label: 'Módulo Chat', icon: MessageSquare, color: 'text-emerald-500', badge: '3' },
+    { id: 'whatsapp', label: 'Módulo Chat', icon: MessageSquare, color: 'text-emerald-500', badge: undefined },
     { id: 'crm', label: 'Funil Kanban', icon: GitBranch, color: 'text-violet-500' },
     { id: 'campanhas', label: 'Campanhas', icon: Megaphone, color: 'text-indigo-400' },
-    { id: 'inteligencia_comercial', label: 'InteligÃªncia Comercial', icon: LineChart, color: 'text-cyan-500' },
-    { id: 'disparador', label: 'Disparador Inteligente', icon: Send, color: 'text-blue-500' },
+    { id: 'inteligencia_comercial', label: 'Inteligência Comercial', icon: LineChart, color: 'text-cyan-500' },
+    { id: 'disparador', label: 'Venda Ativa · Disparador', icon: Send, color: 'text-blue-500' },
     { id: 'cardapio', label: 'Cardápio Digital', icon: Utensils, color: 'text-emerald-450' },
     { id: 'pedidos', label: 'Pedidos', icon: ShoppingBag, color: 'text-amber-500' },
     { id: 'cozinha', label: 'Cozinha', icon: ChefHat, color: 'text-rose-500' },
@@ -79,7 +81,7 @@ export default function Sidebar({
           </div>
           <div>
             <h1 className="font-sans font-bold text-sm tracking-tight text-slate-900 dark:text-white leading-none">
-              LidacomZapCRM Inteligente
+              SoftwareVendasLidacom
             </h1>
             <span className="text-[10px] font-mono font-medium text-emerald-500 flex items-center gap-1 mt-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" />
@@ -111,7 +113,7 @@ export default function Sidebar({
 
       {/* Navigation List */}
       <div className="flex-1 overflow-y-auto px-4 py-2 space-y-1 scrollbar-thin">
-        {menuItems.map((item) => {
+        {menuItems.filter(item=>permitted(item.id)).map((item) => {
           const Icon = item.icon;
           const isActive = currentTab === item.id;
           return (

@@ -62,12 +62,13 @@ export function generateCustomerCommercialProfiles(
   deliveryOrders: DeliveryOrder[],
   rules: CommercialRulesConfig = DEFAULT_COMMERCIAL_RULES
 ): CustomerCommercialProfile[] {
+  const canonicalIds = new Set(orders.map(order => order.id));
   const normalizedOrders = [
     ...orders
-      .filter((order) => order.status !== 'Cancelado')
+      .filter((order) => order.status === 'Pago')
       .map(normalizeCrmOrder),
     ...deliveryOrders
-      .filter((order) => order.status !== 'FECHADO' || order.total > 0)
+      .filter((order) => !canonicalIds.has(order.id) && order.financialStatus === 'Pago')
       .map(normalizeDeliveryOrder),
   ];
 
