@@ -15,7 +15,7 @@ export type FunnelStage =
   | 'Fechado'
   | 'Pós-venda';
 
-export type UserRole = 'administrador' | 'caixa' | 'cozinha' | 'atendimento' | 'entregador';
+export type UserRole = 'administrador_saas' | 'gerente' | 'operador' | 'administrador' | 'caixa' | 'cozinha' | 'atendimento' | 'entregador';
 
 export interface User {
   id: string;
@@ -847,6 +847,9 @@ export interface DeliveryOrderItem {
 }
 
 export interface DeliveryOrder {
+  courierId?: string;
+  trackingToken?: string;
+  financialStatus?: Order['status'];
   id: string;
   clientId: string;
   clientName: string;

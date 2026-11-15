@@ -1,21 +1,26 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getFirestore, connectFirestoreEmulator } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBcwx-yl9i_J1nJldAjjVGb7OC-9O-dOG4",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "project-1300957a-ea82-4645-845.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "project-1300957a-ea82-4645-845",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "project-1300957a-ea82-4645-845.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "483558069545",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:483558069545:web:74afce08cd3071e7f6d338"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-const app = initializeApp(firebaseConfig);
+const emulated = import.meta.env.VITE_USE_EMULATORS === 'true';
+const app = initializeApp(emulated ? {projectId:'demo-zapadaptar',apiKey:'demo-only',authDomain:'localhost',appId:'demo'} : firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
+if (emulated) {
+  connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+  connectFirestoreEmulator(db, '127.0.0.1', 8080);
+}
 export default app;

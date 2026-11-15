@@ -444,7 +444,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   restaurant: {
     name: 'Restaurante Prato Mineiro',
     brandName: 'Restaurante Prato Mineiro',
-    systemName: 'LidacomZapCRM Inteligente',
+    systemName: 'SoftwareVendasLidacom',
     legalName: '',
     cnpj: '',
     phone: '',
@@ -486,7 +486,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     differenceTolerance: 0,
   },
   whatsapp: {
-    sessionStatus: 'connected',
+    sessionStatus: 'disconnected',
     quickTemplates: [
       'Olá {nome}! Seu pedido foi recebido pelo Restaurante Prato Mineiro.',
       'Seu pedido entrou em produção.',
@@ -522,9 +522,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   intervalMax: 12,
   autoPause: true,
   autoPauseAfter: 50,
-  supabaseUrl: 'https://supabase.co/xyz-crm-app',
-  supabaseAnonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSJ9.mockKeyString',
-  waSessionStatus: 'connected',
+  waSessionStatus: 'disconnected',
   operatorRole: 'Admin',
   operatorName: 'Administrador',
   theme: 'dark'

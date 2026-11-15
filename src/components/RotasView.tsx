@@ -25,6 +25,7 @@ import {
   Smartphone,
   Info
 } from 'lucide-react';
+import { operate } from '../lib/commands';
 import { motion, AnimatePresence } from 'motion/react';
 import { Courier, DeliveryRoute, DeliveryOrder, Message } from '../types';
 
@@ -90,7 +91,7 @@ export default function RotasView({
         [cleanPhone]: [...clientMsgs, newMsg]
       };
     });
-    addLog(`Mensagem WhatsApp despachada para o contato ${cleanPhone}!`);
+    addLog(`Mensagem de demonstração registrada para o contato ${cleanPhone}!`);
   };
 
   // Run periodic automated checks & route coordinate simulation
@@ -145,7 +146,7 @@ export default function RotasView({
       const now = new Date();
       
       // Look for orders "PRONTO" but without any courier/route
-      const pendingOrdersCount = deliveryOrders.filter(o => o.status === 'PRONTO' && !routes.some(r => r.orderId === o.id)).length;
+      const pendingOrdersCount = deliveryOrders.filter(o => o.status === 'PRONTO' && !['balcao','mesa_qr'].includes(o.channel || '') && !o.courierId && !routes.some(r => r.orderId === o.id)).length;
       if (pendingOrdersCount > 0) {
         newAlerts.push(`ALERTA: Há ${pendingOrdersCount} pedido(s) pronto(s) sem entregadores vinculados!`);
       }
@@ -168,10 +169,12 @@ export default function RotasView({
   }, [deliveryOrders, routes, setRoutes]);
 
   // Handle Automatic Dispatch algorithm
-  const triggerAutoDispatch = () => {
+  const [selectedOrder, selectOrder] = useState('');
+  const [selectedCourier, selectCourier] = useState('');
+  const triggerAutoDispatch = (manual = false) => {
     // Locate orders that are ready but have no assigned route
     const readyOrders = deliveryOrders.filter(o => 
-      o.status === 'PRONTO' && 
+      o.status === 'PRONTO' && !['balcao','mesa_qr'].includes(o.channel || '') && !o.courierId &&
       !routes.some(r => r.orderId === o.id)
     );
 
@@ -188,201 +191,23 @@ export default function RotasView({
     }
 
     // Match the first ready order with the first available courier
-    const orderToMatch = readyOrders[0];
-    const courierToMatch = availableCouriers[0];
+    const orderToMatch = manual ? readyOrders.find(order => order.id === selectedOrder) : readyOrders[0];
+    if (!orderToMatch) return;
+    // A retirada começa no restaurante. As coordenadas desta simulação são fictícias.
+    const distanceToPickup = (courier: Courier) => Math.hypot(courier.lastLocation.lat + 23.5615, courier.lastLocation.lng + 46.6559);
+    const courierToMatch = manual ? availableCouriers.find(courier => courier.id === selectedCourier)
+      : [...availableCouriers].sort((a, b) => distanceToPickup(a) - distanceToPickup(b))[0];
+    if (!courierToMatch) return;
 
-    // Create route
-    const newRouteId = `R-${orderToMatch.id.replace('DEL-', '')}`;
-    const newRoute: DeliveryRoute = {
-      id: newRouteId,
-      orderId: orderToMatch.id,
-      courierId: courierToMatch.id,
-      status: 'Aguardando Entregador',
-      originLat: -23.5615, // Base Restaurante
-      originLng: -46.6559,
-      // Distribute dest randomly near Paulista Area
-      destLat: -23.5615 + (Math.random() - 0.5) * 0.018,
-      destLng: -46.6559 + (Math.random() - 0.5) * 0.018,
-      currentLat: -23.5615,
-      currentLng: -46.6559,
-      remainingDistance: '3.1 km',
-      remainingTime: '12 min',
-      speedKmh: 0,
-      historyCoords: [{ lat: -23.5615, lng: -46.6559 }],
-      alerts: [],
-      updatedAt: new Date().toISOString()
-    };
-
-    setRoutes(prev => [...prev, newRoute]);
-
-    // Update courier status
-    setCouriers(prev => prev.map(c => {
-      if (c.id === courierToMatch.id) {
-        return {
-          ...c,
-          status: 'Em entrega',
-          activeOrders: [...c.activeOrders, orderToMatch.id]
-        };
-      }
-      return c;
-    }));
-
-    // Update order status
-    setDeliveryOrders(prev => prev.map(o => {
-      if (o.id === orderToMatch.id) {
-        return {
-          ...o,
-          status: 'EM ENTREGA'
-        };
-      }
-      return o;
-    }));
-
-    addLog(`Match Efetuado! Algoritmo vinculou Pedido #${orderToMatch.id} ao motociclista ${courierToMatch.name}.`);
-    
-    // Send automated WhatsApp hook to client
-    triggerWhatsAppWebhook(
-      orderToMatch.clientPhone,
-      `🛵 Olá, ${orderToMatch.clientName}! Seu entregador pegou a rota. O motoboy ${courierToMatch.name} (${courierToMatch.vehicle}) está a caminho do seu endereço!`
-    );
+    operate('assign',{orderId:orderToMatch.id,courierId:courierToMatch.id})
+      .then(()=>addLog('Entregador atribuído. Aguardando aceite.')).catch(e=>alert(e.message));
   };
-
-  // Accept/Reject Simulator flow triggered manually by operator mimicking the mobile app
-  const simulateRiderResponse = (routeId: string, accepted: boolean) => {
-    const route = routes.find(r => r.id === routeId);
-    if (!route) return;
-
-    const order = deliveryOrders.find(o => o.id === route.orderId);
-    const courier = couriers.find(c => c.id === route.courierId);
-
-    if (accepted) {
-      // Step to 'Entregador Aceitou'
-      setRoutes(prev => prev.map(r => {
-        if (r.id === routeId) {
-          return { ...r, status: 'Entregador Aceitou' };
-        }
-        return r;
-      }));
-
-      addLog(`Motociclista ${courier ? courier.name : 'Rider'} ACEITOU o despacho do pedido #${route.orderId}.`);
-      
-      if (order) {
-        // Send WhatsApp hook to client
-        triggerWhatsAppWebhook(
-          order.clientPhone,
-          `🛵 Seu entregador foi acionado! O entregador ${courier?.name || 'Rider'} aceitou a chamada e está se deslocando para coletar o pedido.`
-        );
-      }
-    } else {
-      // Reject! Remove courier association from this route, release courier, log alert
-      setRoutes(prev => prev.filter(r => r.id !== routeId));
-      
-      if (courier) {
-        setCouriers(prev => prev.map(c => {
-          if (c.id === courier.id) {
-            return {
-              ...c,
-              status: 'Disponível',
-              activeOrders: c.activeOrders.filter(oId => oId !== route.orderId)
-            };
-          }
-          return c;
-        }));
-      }
-
-      if (order) {
-        setDeliveryOrders(prev => prev.map(o => {
-          if (o.id === order.id) {
-            return { ...o, status: 'PRONTO' };
-          }
-          return o;
-        }));
-      }
-
-      addLog(`AVISO: Motociclista ${courier ? courier.name : 'Rider'} REJEITOU o chamado do pedido #${route.orderId}. Rota desfeita.`);
-    }
+  const updateRouteStepStatus = (routeId: string, step: string) => {
+    const route = routes.find(r=>r.id===routeId);
+    if (route) operate('routeStep',{orderId:route.orderId,step}).catch(e=>alert(e.message));
   };
-
-  // Change Route step status manually
-  const updateRouteStepStatus = (routeId: string, nextStatus: DeliveryRoute['status']) => {
-    const route = routes.find(r => r.id === routeId);
-    if (!route) return;
-
-    const order = deliveryOrders.find(o => o.id === route.orderId);
-    const courier = couriers.find(c => c.id === route.courierId);
-
-    // Update Route status
-    setRoutes(prev => prev.map(r => {
-      if (r.id === routeId) {
-        return {
-          ...r,
-          status: nextStatus,
-          speedKmh: nextStatus === 'Em Rota' ? 44 : 0,
-          updatedAt: new Date().toISOString()
-        };
-      }
-      return r;
-    }));
-
-    addLog(`Rota ${routeId} alterada para etapa: [${nextStatus}].`);
-
-    if (order) {
-      if (nextStatus === 'Pedido Coletado') {
-        // Trigger SMS/WhatsApp message
-        triggerWhatsAppWebhook(
-          order.clientPhone,
-          `📦 Seu pedido foi coletado! O entregador conferiu e colocou a embalagem térmica na mochila de transporte.`
-        );
-      } 
-      else if (nextStatus === 'Em Rota') {
-        // Update Order to EM ENTREGA
-        setDeliveryOrders(prev => prev.map(o => {
-          if (o.id === order.id) {
-            return { ...o, status: 'EM ENTREGA' };
-          }
-          return o;
-        }));
-
-        // Send GPS tracker link
-        triggerWhatsAppWebhook(
-          order.clientPhone,
-          `📍 Seu pedido está a caminho! Acompanhe o trajeto em tempo real pelo painel de rastreio.\n⏱️ Previsão de entrega: ${route.remainingTime || '15 min'}.`
-        );
-      } 
-      else if (nextStatus === 'Pedido Entregue') {
-        // Update Order to FECHADO
-        setDeliveryOrders(prev => prev.map(o => {
-          if (o.id === order.id) {
-            return { ...o, status: 'FECHADO' };
-          }
-          return o;
-        }));
-
-        // Release Courier
-        if (courier) {
-          setCouriers(prev => prev.map(c => {
-            if (c.id === courier.id) {
-              return {
-                ...c,
-                status: 'Disponível',
-                activeOrders: c.activeOrders.filter(id => id !== order.id)
-              };
-            }
-            return c;
-          }));
-        }
-
-        // Send final WhatsApp messages
-        triggerWhatsAppWebhook(
-          order.clientPhone,
-          `✅ Pedido entregue! Obrigado por comprar no Cardápio Digital. Avalie o entregador se possível!`
-        );
-
-        // Delete active routing tracking now that it is completed
-        setRoutes(prev => prev.filter(r => r.id !== routeId));
-      }
-    }
-  };
+  const simulateRiderResponse = (routeId: string, accepted:boolean) =>
+    updateRouteStepStatus(routeId,accepted ? 'Entregador Aceitou' : 'recusar');
 
   // Find routing coordinates or names
   const getOrderAddressText = (orderId: string) => {
@@ -394,6 +219,13 @@ export default function RotasView({
   return (
     <div id="rotas-view-container" className="space-y-6 font-sans text-slate-800 dark:text-slate-100 transition-colors">
       
+      <section className="bg-white dark:bg-slate-900 p-5 rounded-xl space-y-2">
+        <h2 className="font-bold">Painel de Despachos</h2>
+        <p>Mapa simulado · Distribuição por distância fictícia até o restaurante.</p>
+        <select aria-label="Pedido pronto" value={selectedOrder} onChange={e => selectOrder(e.target.value)}><option value="">Pedido pronto para entrega</option>{deliveryOrders.filter(o => o.status === 'PRONTO' && !['balcao','mesa_qr'].includes(o.channel || '') && !o.courierId && !routes.some(r => r.orderId === o.id)).map(o => <option key={o.id} value={o.id}>{o.id} · {o.clientName} · Aguardando entregador</option>)}</select>
+        <select aria-label="Entregador disponível" value={selectedCourier} onChange={e => selectCourier(e.target.value)}><option value="">Entregador disponível</option>{couriers.filter(c => c.status === 'Disponível').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        <button disabled={!selectedOrder || !selectedCourier} onClick={() => triggerAutoDispatch(true)}>Atribuir entregador</button>
+      </section>
       {/* HEADER BAR */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-100 dark:border-slate-850 pb-5">
         <div>
@@ -427,7 +259,7 @@ export default function RotasView({
           </div>
 
           <button
-            onClick={triggerAutoDispatch}
+            disabled={!isAutoDispatchEnabled} onClick={() => triggerAutoDispatch()}
             className="bg-indigo-600 hover:bg-indigo-550 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md shadow-indigo-600/15 transition active:scale-95"
           >
             <Shuffle className="w-4 h-4" />

@@ -9,28 +9,23 @@ import { Client, Order, OrderItem } from '../types';
 
 interface OrderModalProps {
   client: Client;
+  products: {id:string; name:string; price:number}[];
   onClose: () => void;
-  onSaveOrder: (order: Order) => void;
+  onSaveOrder: (order: Order) => Promise<void>;
 }
 
-const STOCK_PRODUCTS = [
-  { id: 'p1', name: 'Jaqueta Blazer Couro Ecológico', price: 349.90 },
-  { id: 'p2', name: 'Regata Seda Básica Areia', price: 51.10 },
-  { id: 'p3', name: 'Lote Atacado Calçados Sandálias Verão', price: 1600.00 },
-  { id: 'p4', name: 'Caneca Cerâmica Personalizada Corretor', price: 45.00 },
-  { id: 'p5', name: 'Kit Cremes Anti-age SkinCare', price: 120.00 },
-];
-
-export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalProps) {
-  const [selectedProductId, setSelectedProductId] = useState<string>(STOCK_PRODUCTS[0].id);
+export default function OrderModal({ client, products, onClose, onSaveOrder }: OrderModalProps) {
+  const [selectedProductId, setSelectedProductId] = useState(products[0]?.id || '');
+  const [requestId] = useState(() => crypto.randomUUID());
+  const [busy,setBusy] = useState(false);
+  const [error,setError] = useState('');
   const [quantity, setQuantity] = useState<number>(1);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<Order['paymentMethod']>('Pix');
-  const [orderStatus, setOrderStatus] = useState<Order['status']>('Pendente');
   const [orderNotes, setOrderNotes] = useState<string>('');
 
   const handleAddItem = () => {
-    const product = STOCK_PRODUCTS.find((p) => p.id === selectedProductId);
+    const product = products.find((p) => p.id === selectedProductId);
     if (!product) return;
 
     // Check if item already exists
@@ -41,7 +36,7 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
       setOrderItems(updated);
     } else {
       const newItem: OrderItem = {
-        id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        id: product.id,
         productName: product.name,
         price: product.price,
         quantity,
@@ -59,7 +54,7 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
     return orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
   };
 
-  const handleCreateOrderSubmit = (e: React.FormEvent) => {
+  const handleCreateOrderSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (orderItems.length === 0) {
       alert('Por favor, adicione pelo menos um produto ao pedido!');
@@ -68,19 +63,22 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
 
     const orderTotal = getOrderTotal();
     const newOrder: Order = {
-      id: `PED-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: requestId,
       clientId: client.id,
       clientName: client.name,
       items: orderItems,
       total: orderTotal,
       paymentMethod,
-      status: orderStatus,
+      status: 'Pendente',
       createdAt: new Date().toISOString(),
       notes: orderNotes,
     };
 
-    onSaveOrder(newOrder);
-    onClose();
+    if (busy) return;
+    setBusy(true);
+    try { await onSaveOrder(newOrder); onClose(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Falha ao criar o pedido.'); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -107,6 +105,8 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
         </div>
 
         <form onSubmit={handleCreateOrderSubmit} className="space-y-4 text-xs">
+          {error && <p role="alert">{error}</p>}
+          {!products.length && <p>Cadastre produtos no Cardápio Digital para lançar um pedido.</p>}
           
           {/* Section 1: Product choice */}
           <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-200/50 dark:border-slate-750 space-y-3">
@@ -118,7 +118,7 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
                   onChange={(e) => setSelectedProductId(e.target.value)}
                   className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-2 rounded-xl text-slate-800 dark:text-slate-200 focus:outline-none"
                 >
-                  {STOCK_PRODUCTS.map((prod) => (
+                  {products.map((prod) => (
                     <option key={prod.id} value={prod.id}>
                       {prod.name} (R$ {prod.price.toFixed(2)})
                     </option>
@@ -200,15 +200,7 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
 
             <div>
               <label className="block text-slate-400 font-bold mb-1 uppercase tracking-wider text-[9px]">Status Financeiro</label>
-              <select
-                value={orderStatus}
-                onChange={(e) => setOrderStatus(e.target.value as any)}
-                className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-2 rounded-xl text-slate-850 dark:text-slate-200 font-bold focus:outline-none"
-              >
-                <option value="Pendente" className="text-amber-500">PENDENTE (Aguardando Pgto)</option>
-                <option value="Pago" className="text-emerald-500">PAGO (Compensado)</option>
-                <option value="Cancelado" className="text-rose-500">CANCELADO</option>
-              </select>
+              <p>Aguardando confirmação do pagamento</p>
             </div>
           </div>
 
@@ -241,7 +233,7 @@ export default function OrderModal({ client, onClose, onSaveOrder }: OrderModalP
                 Cancelar
               </button>
               <button
-                type="submit"
+                type="submit" aria-busy={busy}
                 className="bg-emerald-505 bg-emerald-505 bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl text-xs inline-flex items-center gap-1.5 shadow-md shadow-emerald-505/10 transition"
               >
                 <ShoppingCart className="w-4 h-4" />

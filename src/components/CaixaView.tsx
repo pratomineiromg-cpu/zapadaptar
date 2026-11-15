@@ -120,11 +120,11 @@ export default function CaixaView({
     printWindow.print();
   };
   
-  const handleOpenCashier = (e: React.FormEvent) => {
+  const handleOpenCashier = async (e: React.FormEvent) => {
     e.preventDefault();
     const val = parseFloat(initialValue.replace(',', '.'));
     if (onOpenCashier) {
-      onOpenCashier(val);
+      try { await onOpenCashier(val); } catch(e) { alert(e instanceof Error ? e.message : 'Falha ao abrir o caixa'); }
       return;
     }
 
@@ -143,7 +143,7 @@ export default function CaixaView({
     });
   };
 
-  const handleTransaction = (e: React.FormEvent) => {
+  const handleTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!session) return;
     
@@ -163,7 +163,7 @@ export default function CaixaView({
     };
 
     if (onRegisterTransaction) {
-      onRegisterTransaction(operationType, val, opDesc);
+      try { await onRegisterTransaction(operationType, val, opDesc); } catch(e) { alert(e instanceof Error ? e.message : 'Falha no lançamento'); return; }
       setOpValue('');
       setOpDesc('');
       return;
@@ -184,7 +184,7 @@ export default function CaixaView({
     setOpDesc('');
   };
 
-  const handleCloseCashier = () => {
+  const handleCloseCashier = async () => {
     if (!session) return;
     const closingData = {
       dinheiro: parseOptionalCurrency(closingDinheiro),
@@ -195,7 +195,7 @@ export default function CaixaView({
     };
 
     if (onCloseCashier) {
-      onCloseCashier(closingData);
+      try { await onCloseCashier(closingData); } catch(e) { alert(e instanceof Error ? e.message : 'Falha ao fechar o caixa'); }
       return;
     }
 

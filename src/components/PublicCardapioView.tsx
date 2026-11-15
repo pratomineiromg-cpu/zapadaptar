@@ -11,8 +11,8 @@ import {
   User,
   Phone,
 } from 'lucide-react';
-import { collection, doc, getDocs, setDoc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { call } from '../lib/commands';
+import { useParams } from 'react-router-dom';
 import {
   Cardapio,
   ProductDigitalMenu,
@@ -20,13 +20,16 @@ import {
   DeliveryOrderItem,
 } from '../types';
 
-interface PublicCardapioViewProps {
-  menuId: string;
-}
-
-export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) {
-  const [cardapios, setCardapios] = useState<Cardapio[]>([]);
+export default function PublicCardapioView() {
+  const { tenantId, menuId } = useParams();
+  const [menu, setMenu] = useState<Cardapio | null>(null);
   const [products, setProducts] = useState<ProductDigitalMenu[]>([]);
+  const [deliveryFee, setFee] = useState(0);
+  const [accepting, setAccepting] = useState(false);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [trackingToken, setTrackingToken] = useState('');
+  const request = React.useRef({ signature: '', id: '' });
   const [basket, setBasket] = useState<DeliveryOrderItem[]>([]);
   const [step, setStep] = useState<'browse' | 'checkout' | 'success'>('browse');
   const [loading, setLoading] = useState(true);
@@ -41,39 +44,16 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
   const [lastOrderId, setLastOrderId] = useState('');
 
   useEffect(() => {
-    const loadPublicMenuData = async () => {
-      try {
-        const [menusSnap, productsSnap] = await Promise.all([
-          getDocs(collection(db, 'cardapios')),
-          getDocs(collection(db, 'productsDigitalMenu')),
-        ]);
-
-        const loadedMenus = menusSnap.docs.map((docSnap) => ({
-          ...(docSnap.data() as Cardapio),
-          id: docSnap.id,
-        }));
-
-        const loadedProducts = productsSnap.docs.map((docSnap) => ({
-          ...(docSnap.data() as ProductDigitalMenu),
-          id: docSnap.id,
-        }));
-
-        setCardapios(loadedMenus);
-        setProducts(loadedProducts);
-      } catch (error) {
-        console.error('ERRO AO CARREGAR CARDÁPIO PÚBLICO:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadPublicMenuData();
-  }, []);
-
-  const menu = useMemo(
-    () => cardapios.find((item) => item.id === menuId),
-    [cardapios, menuId]
-  );
+    let active = true;
+    setLoading(true);
+    call<{ menu: Cardapio; products: ProductDigitalMenu[]; fee: number; accepting: boolean }>('readMenu', { menuId, tenantId })
+      .then(result => {
+        if (!active) return;
+        setMenu(result.menu); setProducts(result.products); setFee(result.fee); setAccepting(result.accepting);
+      }).catch(e => { if (active) setError(e.code === 'functions/not-found' ? 'Cardápio não encontrado' : 'Não foi possível consultar o cardápio.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [menuId, tenantId]);
 
   const menuProducts = useMemo(() => {
     if (!menu) return [];
@@ -83,22 +63,28 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
   }, [menu, products]);
 
   const subtotal = basket.reduce((sum, item) => sum + item.subtotal, 0);
-  const deliveryFee = 7;
+
   const total = subtotal + deliveryFee;
 
-  const handleAddProduct = (product: ProductDigitalMenu) => {
-    const baseSize = product.tamanhos?.[0];
+  const handleAddProduct = (product: ProductDigitalMenu, event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const choices = new FormData(event.currentTarget);
+    const baseSize = product.tamanhos?.find(size => size.label === choices.get('size'));
+    const selectedAddons = (product.adicionais || []).filter(option => choices.getAll('addon').includes(option.id));
+    const selectedUtensils = (product.utensilios || []).filter(option => choices.getAll('utensil').includes(option.id));
+    const quantity = Number(choices.get('quantity'));
+    const basePrice = baseSize?.price ?? product.price;
+    const unitCents = [...selectedAddons,...selectedUtensils].reduce((sum,o)=>sum+Math.round(o.price*100),Math.round(basePrice*100));
 
     const item: DeliveryOrderItem = {
       productId: product.id,
       productName: product.name,
       selectedSize: baseSize?.label || 'Único',
-      selectedSizePrice: baseSize?.price || product.price,
-      selectedAddons: [],
-      removedItems: [],
-      selectedUtensils: [],
-      quantity: 1,
-      subtotal: baseSize?.price || product.price,
+      selectedSizePrice: baseSize?.price ?? product.price,
+      selectedAddons, selectedUtensils, quantity,
+      removedItems: choices.getAll('remove').map(String),
+      observation: String(choices.get('note') || '').trim(),
+      subtotal: unitCents * quantity / 100,
     };
 
     setBasket((prev) => [...prev, item]);
@@ -111,135 +97,18 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
   const handleSubmitOrder = async (e: React.FormEvent) => {
     e.preventDefault();
   
-    if (!menu || basket.length === 0) return;
-  
-    const orderId = `DEL-${Math.floor(1000 + Math.random() * 9000)}`;
-    const clientId = `public_${customerPhone.replace(/\D/g, '') || Date.now()}`;
-    const nowIso = new Date().toISOString();
-    const today = nowIso.split('T')[0];
-    const nowTime = new Date().toLocaleTimeString('pt-BR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  
-    const newOrder: DeliveryOrder = {
-      id: orderId,
-      clientId,
-      clientName: customerName,
-      clientPhone: customerPhone,
-      items: basket,
-      subtotal,
-      deliveryFee,
-      total,
-      paymentMethod,
-      status: 'PEDIDO GERADO',
-      createdAt: nowIso,
-      deliveryTime: 'Imediato',
-      address: {
-        name: customerName,
-        phone: customerPhone,
-        street,
-        number,
-        neighborhood,
-        complement: complement || undefined,
-        zipCode: '',
-      },
-      channel: 'whatsapp',
-      notes: `Pedido recebido via cardápio público: ${menu.name}`,
-    };
-  
-    await setDoc(doc(db, 'deliveryOrders', orderId), newOrder, { merge: true });
-  
-    const clientRef = doc(db, 'clients', clientId);
-    const clientSnap = await getDoc(clientRef);
-  
-    if (clientSnap.exists()) {
-      const currentClient = clientSnap.data();
-  
-      await setDoc(
-        clientRef,
-        {
-          ...currentClient,
-          id: clientId,
-          name: customerName,
-          phone: customerPhone,
-          channel: 'whatsapp',
-          stage: 'Pedido gerado',
-          type: currentClient.type || 'salvo',
-          tags: Array.isArray(currentClient.tags)
-            ? Array.from(new Set([...currentClient.tags, 'Pedido Cardápio']))
-            : ['Pedido Cardápio'],
-          totalBought: Number(currentClient.totalBought || 0) + total,
-          lastPurchaseDate: today,
-          notes: Array.isArray(currentClient.notes) ? currentClient.notes : [],
-          dispatched: Boolean(currentClient.dispatched),
-          avatarColor: currentClient.avatarColor || 'bg-emerald-500',
-        },
-        { merge: true }
-      );
-    } else {
-      await setDoc(clientRef, {
-        id: clientId,
-        name: customerName,
-        phone: customerPhone,
-        channel: 'whatsapp',
-        stage: 'Pedido gerado',
-        type: 'salvo',
-        tags: ['Pedido Cardápio'],
-        totalBought: total,
-        lastPurchaseDate: today,
-        notes: [`Cliente criado automaticamente pelo cardápio público: ${menu.name}`],
-        dispatched: false,
-        avatarColor: 'bg-emerald-500',
-      });
-    }
-  
-    const messageText = `🛒 *PEDIDO RECEBIDO PELO CARDÁPIO PÚBLICO*
-  Código: *${orderId}*
-  Cliente: ${customerName}
-  Telefone: ${customerPhone}
-  Total: *R$ ${total.toFixed(2)}*
-  Pagamento: ${paymentMethod}
-  Status: *PEDIDO GERADO*`;
-  
-    const messagesRef = doc(db, 'messages', clientId);
-    const messagesSnap = await getDoc(messagesRef);
-  
-    const newMessage = {
-      id: `msg_sys_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
-      sender: 'sistema',
-      channel: 'whatsapp',
-      type: 'text',
-      text: messageText,
-      timestamp: nowTime,
-    };
-  
-    if (messagesSnap.exists()) {
-      await updateDoc(messagesRef, {
-        items: arrayUnion(newMessage),
-      });
-    } else {
-      await setDoc(messagesRef, {
-        clientId,
-        items: [newMessage],
-      });
-    }
-  
-    const historyId = `h_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-  
-    await setDoc(doc(db, 'history', historyId), {
-      id: historyId,
-      clientId,
-      type: 'order_created',
-      title: 'Pedido recebido pelo Cardápio Público',
-      description: `Pedido ${orderId} recebido pelo cardápio público ${menu.name}. Total: R$ ${total.toFixed(2)}.`,
-      timestamp: nowIso,
-      operatorName: 'Sistema',
-    });
-  
-    setLastOrderId(orderId);
-    setBasket([]);
-    setStep('success');
+    if (!menu || !accepting || !basket.length || busy) return;
+    setBusy(true); setError('');
+    const payload = { menuId, tenantId, name: customerName, phone: customerPhone, street, number, neighborhood, complement, paymentMethod,
+      expectedTotalCents: Math.round(total * 100), items: basket.map(i => ({ productId:i.productId, selectedSize:i.selectedSize, quantity:i.quantity,
+        addonIds:i.selectedAddons.map(o=>o.id), utensilIds:i.selectedUtensils.map(o=>o.id), removedItems:i.removedItems, observation:i.observation })) };
+    const signature = JSON.stringify(payload);
+    if (signature !== request.current.signature) request.current = { signature, id: crypto.randomUUID() };
+    try {
+      const result = await call<{orderId: string; trackingToken: string}>('createMenuOrder', { ...payload, requestId: request.current.id });
+      setTrackingToken(result.trackingToken); setLastOrderId(result.orderId); setBasket([]); setStep('success');
+    } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível concluir o pedido.'); }
+    finally { setBusy(false); }
   };
 
   if (loading) {
@@ -254,7 +123,7 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-center">
         <div className="bg-white rounded-2xl shadow-sm border p-6 max-w-sm">
-          <h1 className="text-lg font-bold text-slate-900">Cardápio não encontrado</h1>
+          <h1 className="text-lg font-bold text-slate-900">{error || 'Cardápio não encontrado'}</h1>
           <p className="text-sm text-slate-500 mt-2">
             O link acessado não corresponde a nenhum cardápio ativo.
           </p>
@@ -294,6 +163,8 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
           </div>
         </div>
 
+        {error && <p role="alert" className="p-4 text-red-700">{error}</p>}
+        {!accepting && <p className="p-4">Recebimento de pedidos encerrado</p>}
         {step === 'browse' && (
           <div className="p-4 space-y-4">
             <h2 className="text-sm font-bold uppercase text-slate-400 tracking-wider">
@@ -301,7 +172,7 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
             </h2>
 
             {menuProducts.map((product) => (
-              <div
+              <form onSubmit={event=>handleAddProduct(product,event)}
                 key={product.id}
                 className="bg-white border border-slate-200 rounded-2xl p-3 flex gap-3 shadow-sm"
               >
@@ -317,17 +188,25 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
                     {product.description}
                   </p>
                   <p className="text-sm font-bold text-emerald-600 mt-2">
-                    R$ {product.price.toFixed(2)}
+                    R$ {(product.tamanhos?.[0]?.price ?? product.price).toFixed(2)}
                   </p>
+                  <details className="mt-2 text-sm"><summary className="cursor-pointer">Personalizar item</summary>
+                    <div className="grid gap-2 py-2">
+                      {!!product.tamanhos?.length && <label>Tamanho <select name="size">{product.tamanhos.map(s=><option key={s.label} value={s.label}>{s.label} · R$ {s.price.toFixed(2)}</option>)}</select></label>}
+                      {([['addon',product.adicionais],['utensil',product.utensilios]] as const).map(([group,options])=>(options || []).map(o=><label key={group+o.id}><input type="checkbox" name={group} value={o.id}/> {o.name} · R$ {o.price.toFixed(2)}</label>))}
+                      {(product.naoMandar || []).map(o=><label key={o}><input type="checkbox" name="remove" value={o}/> {o}</label>)}
+                      <label>Quantidade <input className="w-16 border rounded" type="number" name="quantity" min="1" max="99" defaultValue="1" required/></label>
+                      <label>Observação <textarea className="w-full border rounded" name="note" maxLength={300}/></label>
+                    </div></details>
                 </div>
 
                 <button
-                  onClick={() => handleAddProduct(product)}
+                  disabled={!accepting} type="submit" aria-label={'Adicionar '+product.name}
                   className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 self-center"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
-              </div>
+              </form>
             ))}
           </div>
         )}
@@ -342,6 +221,11 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
               <ChevronLeft className="w-4 h-4" />
               Voltar ao cardápio
             </button>
+            <section className="bg-white rounded-2xl border p-4 space-y-2"><h2 className="font-bold">Seu pedido</h2>
+              {basket.map((i,index)=><div key={index}><strong>{i.quantity} × {i.productName} ({i.selectedSize}) · R$ {i.subtotal.toFixed(2)}</strong>
+                <p>{[...i.selectedAddons.map(o=>o.name),...i.selectedUtensils.map(o=>o.name),...i.removedItems,i.observation].filter(Boolean).join(' · ')}</p>
+                <button type="button" onClick={()=>{handleRemoveItem(index);if(basket.length===1)setStep('browse');}}>Remover item</button></div>)}
+              <p>Entrega · R$ {deliveryFee.toFixed(2)}</p><strong>Total · R$ {total.toFixed(2)}</strong></section>
 
             <div className="bg-white rounded-2xl border p-4 space-y-3">
               <h2 className="font-bold text-lg">Dados para entrega</h2>
@@ -407,7 +291,7 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
             </div>
 
             <button
-              type="submit"
+              disabled={busy || !accepting} type="submit"
               className="w-full bg-emerald-500 text-white font-bold py-3 rounded-2xl shadow-lg"
             >
               Finalizar Pedido
@@ -424,7 +308,7 @@ export default function PublicCardapioView({ menuId }: PublicCardapioViewProps) 
                 Seu pedido foi enviado para a cozinha.
               </p>
               <p className="text-sm font-mono font-bold text-slate-900 mt-4">
-                Nº {lastOrderId}
+                Nº {lastOrderId} · <a href={`/rastreamento-pedido/${trackingToken}`}>Acompanhar pedido</a>
               </p>
             </div>
           </div>

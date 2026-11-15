@@ -36,6 +36,7 @@ import {
 import { Cardapio, ProductDigitalMenu, DeliveryOrder, DeliveryOrderItem, Client, MenuItemSize, MenuItemAddon, MenuItemUtensil } from '../types';
 
 interface CardapioViewProps {
+  tenantId: string;
   clients: Client[];
   onUpdateClient: (updated: Client) => void;
   onAddHistoryEvent: (clientId: string, type: any, title: string, description: string) => void;
@@ -49,6 +50,7 @@ interface CardapioViewProps {
 }
 
 export default function CardapioView({
+  tenantId,
   clients,
   onUpdateClient,
   onAddHistoryEvent,
@@ -140,29 +142,6 @@ export default function CardapioView({
   const [custDeliveryTime, setCustDeliveryTime] = useState('20:30');
   const [custMethod, setCustMethod] = useState<'delivery' | 'mesa'>('delivery');
   const [custMesa, setCustMesa] = useState('01');
-
-  // Load repeat customer cache or update auto-fill
-  useEffect(() => {
-    if (custPhone) {
-      const formatted = custPhone.replace(/\D/g, '');
-      const cache = localStorage.getItem(`delivery_address_cache_${formatted}`);
-      if (cache) {
-        try {
-          const parsed = JSON.parse(cache);
-          setCustName(parsed.name || '');
-          setCustStreet(parsed.street || '');
-          setCustNumber(parsed.number || '');
-          setCustNeighborhood(parsed.neighborhood || '');
-          setCustComplement(parsed.complement || '');
-          setCustZip(parsed.zipCode || '');
-          setCustEmail(parsed.email || '');
-          setCustPayment(parsed.paymentMethod || 'Pix');
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }
-  }, [custPhone]);
 
   // Last simulated order review (Receipt overlay)
   const [lastPlacedSimOrder, setLastPlacedSimOrder] = useState<DeliveryOrder | null>(null);
@@ -385,17 +364,9 @@ export default function CardapioView({
       changeFor: custChange.trim() || undefined
     };
 
-    // 1. Find matching Client by phone or name to link properly (fallbacks to first available)
-    let matchedClient = clients.find(c => c.phone.replace(/\D/g, '') === custPhone.replace(/\D/g, '') || c.name.toLowerCase().includes(custName.toLowerCase()));
-    
-    if (!matchedClient) {
-      // Pick first active client as fallback operator to inject the WhatsApp message simulation
-      matchedClient = clients[0];
-    }
-    
     const newDelOrder: DeliveryOrder = {
       id: orderId,
-      clientId: matchedClient.id, // Better linking based on matching client
+      clientId: 'preview',
       clientName: custName.trim(),
       clientPhone: custPhone.trim(),
       items: simBasket,
@@ -407,65 +378,11 @@ export default function CardapioView({
       createdAt: new Date().toISOString(),
       deliveryTime: custMethod === 'mesa' ? 'Agora (Local)' : custDeliveryTime,
       address: deliveryAddress,
-      channel: custMethod === 'mesa' ? 'mesa_qr' : (matchedClient.channel === 'ambos' ? 'whatsapp' : matchedClient.channel || 'whatsapp'),
+      channel: custMethod === 'mesa' ? 'mesa_qr' : 'delivery',
       notes: custMethod === 'mesa' ? `Mesa/Comanda: ${custMesa}` : undefined,
     };
 
-    // Save client details to cache for auto-fill in future
-    const phoneDigits = custPhone.replace(/\D/g, '');
-    localStorage.setItem(`delivery_address_cache_${phoneDigits}`, JSON.stringify(deliveryAddress));
-
-    // Append to general state list
-    setDeliveryOrders((prev) => [newDelOrder, ...prev]);
-
-    if (matchedClient) {
-      // Update statistics of CRM client
-      const updatedClient: Client = {
-        ...matchedClient,
-        // Move stage to 'Pedido gerado'
-        stage: 'Pedido gerado',
-        // Update totals
-        totalBought: matchedClient.totalBought + total,
-        lastPurchaseDate: new Date().toISOString().split('T')[0]
-      };
-      onUpdateClient(updatedClient);
-
-      // Create history event
-      onAddHistoryEvent(
-        matchedClient.id,
-        'order_created',
-        'Novo Checkout Delivery',
-        `Pedido de delivery integrado realizado pelo Cardápio: ${orderId} - Total: R$ ${total.toFixed(2)} - Status: PEDIDO GERADO`
-      );
-
-      // 2. BUILD OUT REALISTIC DIGITAL TEXT RECEIPT FOR WHATSAPP INNER SCREEN
-      const orderMessage = `🍔 *NOVO PEDIDO DELIVERY (${orderId})* 🍔
-------------------------------------
-👤 *Cliente:* ${custName}
-📞 *Contatos:* ${custPhone}
-
-🛒 *ITENS:*
-${simBasket.map(it => `• *${it.quantity}x* ${it.productName} (${it.selectedSize})
-  ${it.selectedAddons.length > 0 ? `  + Adicionais: ${it.selectedAddons.map(a => `${a.name}(+R$ ${a.price.toFixed(2)})`).join(', ')}\n` : ''}${it.removedItems.length > 0 ? `  - RETIRAR: ${it.removedItems.join(', ')}\n` : ''}${it.selectedUtensils.length > 0 ? `  + Utensílios: ${it.selectedUtensils.map(u => u.name).join(', ')}\n` : ''}${it.observation ? `  _Obs: "${it.observation}"_\n` : ''}  Subtotal: R$ ${it.subtotal.toFixed(2)}`).join('\n\n')}
-
-------------------------------------
-📦 *DADOS DE ENTREGA:*
-📍 *Endereço:* ${custStreet}, ${custNumber}
-🏙️ *Bairro:* ${custNeighborhood}
-${custComplement ? `🏢 *Complemento:* ${custComplement}\n` : ''}📮 *CEP:* ${custZip}
-⏱️ *Entrega agendada:* ${custDeliveryTime}
-
-🤝 *DADOS FINANCEIROS:*
-💰 *Subtotal:* R$ ${subtotal.toFixed(2)}
-🛵 *Taxa de Entrega:* R$ ${deliveryFee.toFixed(2)}
-💳 *Total:* *R$ ${total.toFixed(2)}*
-💳 *Pagamento:* ${custPayment}${custChange ? ` (Troco para ${custChange})` : ''}
-------------------------------------
-🏁 _Resumo integrado do Restaurante Prato Mineiro_`;
-
-      onSendMessage(matchedClient.id, orderMessage, 'text');
-    }
-
+    // A prévia mantém apenas o comprovante visual do simulador.
     // SetPlaced
     setLastPlacedSimOrder(newDelOrder);
     setCheckoutStep('receipt');
@@ -478,36 +395,6 @@ ${custComplement ? `🏢 *Complemento:* ${custComplement}\n` : ''}📮 *CEP:* ${
       prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o))
     );
 
-    const orderObj = deliveryOrders.find(o => o.id === orderId);
-    if (!orderObj) return;
-
-    // Map delivery order state change to CRM funnel update
-    let targetCrmStage: Client['stage'] = 'Pedido gerado';
-    let label = 'Novo status delivery';
-
-    if (newStatus === 'PRODUÇÃO') {
-      targetCrmStage = 'Produção';
-      label = 'Status: Em Produção';
-    } else if (newStatus === 'PRONTO') {
-      targetCrmStage = 'Produção';
-      label = 'Status: Pronto para entrega';
-    } else if (newStatus === 'EM ENTREGA') {
-      targetCrmStage = 'Entregue';
-      label = 'Status: Saiu para entrega';
-    } else if (newStatus === 'FECHADO') {
-      targetCrmStage = 'Fechado';
-      label = 'Status: Entregue (Fechado)';
-    }
-
-    // Find and update customer
-    const phoneDigits = orderObj.clientPhone.replace(/\D/g, '');
-    const matchedClient = clients.find(c => c.phone.replace(/\D/g, '') === phoneDigits || c.name.toLowerCase().includes(orderObj.clientName.toLowerCase()));
-
-    if (matchedClient) {
-      const updated = { ...matchedClient, stage: targetCrmStage };
-      onUpdateClient(updated);
-      onAddHistoryEvent(matchedClient.id, 'stage_change', 'Automação Comercial Delivery', `O pedido delivery ${orderId} foi alterado para ${newStatus}. Funil CRM sincronizado para a coluna: ${targetCrmStage}.`);
-    }
   };
 
   const handleDeleteDeliveryOrder = (orderId: string) => {
@@ -701,7 +588,7 @@ ${custComplement ? `🏢 *Complemento:* ${custComplement}\n` : ''}📮 *CEP:* ${
 
                       <button
                         onClick={() => {
-                          const text = `Olá, dê uma olhada no nosso menu digital *${menu.name}*! Acesse e faça o pedido direto no chat: ${window.location.origin}/cardapio/${menu.id}`;
+                          const text = `Olá, dê uma olhada no nosso menu digital *${menu.name}*! Acesse e faça o pedido direto no chat: ${window.location.origin}/cardapio/${encodeURIComponent(tenantId)}/${encodeURIComponent(menu.id)}`;
                         
                           if (clients.length > 0) {
                             onSendMessage(clients[0].id, text, 'text');
