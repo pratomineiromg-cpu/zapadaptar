@@ -75,7 +75,7 @@ export const createMenuOrder = onCall(async ({ data }) => {
     const common = { id: orderId, tenantId: tenant.id, clientId, clientName: name, total, totalCents: amounts.totalCents,
       paymentMethod: data.paymentMethod, channel: 'delivery', source: 'cardapio', menuId: menu.id, createdAt };
     tx.create(tenant.collection('orders').doc(orderId), { ...common, status: 'Pendente', items: amounts.items.map(i => ({
-      id: i.productId, productName: i.productName, quantity: i.quantity, price: i.selectedSizePrice })) });
+      ...i, id: i.productId, price: i.unitPrice })) });
     tx.create(tenant.collection('deliveryOrders').doc(orderId), { ...common, ...amounts, address, clientPhone: normalized,
       subtotal: amounts.subtotalCents / 100, deliveryFee: fee, financialStatus: 'Pendente', status: 'PEDIDO GERADO', deliveryTime: 'Imediato', trackingToken });
     tx.create(tenant.collection('history').doc(orderId), { id: orderId, clientId, type: 'order_created',
@@ -93,10 +93,27 @@ export const trackOrder = onCall(async ({ data }) => {
   const tenant = db.collection('tenants').doc(link.tenantId);
   const order = (await tenant.collection('deliveryOrders').doc(link.orderId).get()).data();
   if (!order) throw missing();
-  const route = (await tenant.collection('routes').where('orderId','==',link.orderId).limit(1).get()).docs[0]?.data();
+  const [routes, events] = await Promise.all([
+    tenant.collection('routes').where('orderId','==',link.orderId).limit(1).get(),
+    tenant.collection('deliveryHistories').where('orderId','==',link.orderId).get()
+  ]);
+  const route = routes.docs[0]?.data();
   const courierId = route?.courierId || order.courierId;
   const courier = courierId && (await tenant.collection('couriers').doc(courierId).get()).data();
+  const labels = new Map(Object.entries({
+    'PRODUÇÃO':'Em preparo', 'PRONTO':'Pronto para entrega', 'Entregador atribuído':'Entregador atribuído',
+    'Entregador Aceitou':'Entregador aceitou', 'Indo Retirada':'Indo para retirada', 'Pedido Coletado':'Pedido coletado',
+    'Em Rota':'Em rota', 'Pedido Entregue':'Pedido entregue', 'recusar':'Aguardando nova atribuição'
+  }));
+  const timeline = events.docs.map(doc => ({label:labels.get(doc.get('stage')), at:doc.get('createdAt')}))
+    .filter(event => event.label && typeof event.at === 'string').sort((a,b) => a.at.localeCompare(b.at));
+  if (order.createdAt) timeline.unshift({label:'Pedido recebido', at:order.createdAt});
+  const inTransit = route?.status === 'Em Rota';
+  const phone = String(courier?.phone || '').replace(/\D/g,'');
   return { orderId: link.orderId, status: order.status, routeStatus: route?.status || null,
-    courier: courier?.name?.split(' ')[0] || null, eta: route?.remainingTime || null };
+    courier: courier?.name?.split(' ')[0] || null, eta: inTransit ? route.remainingTime || null : null,
+    simulated: route?.simulated === true, timeline,
+    phone: inTransit && route.shareContact === true && /^(?:55)?\d{10,11}$/.test(phone)
+      ? '+' + (phone.length <= 11 ? '55' : '') + phone : null };
 });
 export { operate, readWorkQueue } from './operations.js';

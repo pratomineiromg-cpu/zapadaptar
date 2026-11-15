@@ -64,7 +64,7 @@ node --test functions/test/operations.test.js tests/firestore-rules.test.mjs
 | Área | Trabalho necessário antes de homologar a plataforma completa |
 |---|---|
 | SaaS | Onboarding real, gestão de usuários e de várias empresas, planos, cobrança, limites e migração reconciliada do banco anterior. |
-| Pedidos e salão | Personalizações no checkout público, esgotamento por ingrediente, agendamento, validação da vigência, PDV completo, mesa/QR e divisão de contas no núcleo transacional. |
+| Pedidos e salão | Esgotamento por ingrediente, agendamento, validação da vigência, PDV completo, mesa/QR e divisão de contas no núcleo transacional. |
 | Financeiro | PSP Pix e webhook, pagamentos parciais, estornos, convênio/fiado, conciliação e trilha completa de recebimentos. |
 | Atendimento e automação | Evolution e RCS, homologação dos canais, fila durável de envio, webhooks, estados verificáveis, IA de pedidos e escalonamento. |
 | Operação | Telemetria real autorizada, ETA e mapa reais, spooler e impressão ESC/POS, satisfação, métricas derivadas de eventos e substituição de simulações remanescentes. |

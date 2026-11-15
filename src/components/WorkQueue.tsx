@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { call, operate } from '../lib/commands';
-type Job = {id:string; status:string; address?:string; items?:{name:string;quantity:number;size:string;notes:string;remove:string[];extras:string[]}[]};
+type Job = {id:string; status:string; shareContact?:boolean; address?:string; items?:{name:string;quantity:number;size:string;notes:string;remove:string[];extras:string[]}[]};
 const steps = ['Aguardando Entregador','Entregador Aceitou','Indo Retirada','Pedido Coletado','Em Rota','Pedido Entregue'];
 export default function WorkQueue({kitchen}:{kitchen:boolean}) {
   const [rows,setRows]=useState<Job[]>([]),[revision,refresh]=useState(0),[error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -25,5 +25,10 @@ export default function WorkQueue({kitchen}:{kitchen:boolean}) {
     {rows.map(job=>{const next=kitchen?({'PEDIDO GERADO':'PRODUÇÃO','PRODUÇÃO':'PRONTO'}[job.status]):steps[steps.indexOf(job.status)+1];
     return <article className="border rounded-xl p-4" key={job.id}><b>{job.id}</b><p>{job.status}</p>{job.address && <p>{job.address}</p>}
       {job.items?.map((i,n)=><p key={n}>{i.quantity} × {i.name} ({i.size}) {[...i.extras,...i.remove,i.notes].filter(Boolean).join(' · ')}</p>)}
+      {!kitchen && <label className="flex items-center gap-2 my-3"><input type="checkbox" checked={job.shareContact === true} disabled={busy} onChange={async e=>{
+        setBusy(true);
+        try { await operate('shareContact',{orderId:job.id,enabled:e.target.checked});refresh(v=>v+1); }
+        catch(error){setError(error instanceof Error ? error.message : 'Falha ao atualizar contato.');} finally{setBusy(false);}
+      }}/>Disponibilizar meu telefone ao cliente enquanto este pedido estiver em rota</label>}
       {next && <button disabled={busy} onClick={()=>advance(job,next)}>Confirmar {next}</button>}</article>;})}</main>;
 }

@@ -9,7 +9,7 @@ const kitchen = [...managers, 'operador', 'cozinha'];
 const permissions = {
   operatorOrder: sales, cashOpen: cash, cashMove: cash, cashClose: cash, receive: cash,
   prepare: kitchen, assign: [...managers,'operador'], routeStep: [...managers,'operador','entregador'],
-  draft: sales, dailyDraft: sales, note: sales,
+  shareContact: ['entregador'], draft: sales, dailyDraft: sales, note: sales,
 };
 const routeSteps = ['Aguardando Entregador','Entregador Aceitou','Indo Retirada','Pedido Coletado','Em Rota','Pedido Entregue'];
 function requireValue(condition, message) {
@@ -123,6 +123,11 @@ export const operate = onCall(async ({auth, data}) => {
           tx.update(shiftRef,{currentBalance:(Math.round(shift.currentBalance*100)+delta)/100,transactions:FieldValue.arrayUnion(entry),updatedAt:timestamp});
         }
       }
+    } else if (action === 'shareContact') {
+      const route = await record('routes',p.orderId);
+      requireValue(auth.token.courierId === route.courierId && route.status !== 'Pedido Entregue'
+        && typeof p.enabled === 'boolean','Permissão de contato inválida.');
+      tx.update(ref('routes',p.orderId),{shareContact:p.enabled});
     } else if (action === 'prepare' || action === 'assign' || action === 'routeStep') {
       const order = await record('deliveryOrders',p.orderId);
       const orderRef = ref('deliveryOrders',p.orderId), routeRef = ref('routes',p.orderId);
@@ -150,7 +155,13 @@ export const operate = onCall(async ({auth, data}) => {
           tx.update(courierRef,{status:'Disponível',activeOrders:FieldValue.arrayRemove(p.orderId)});
         } else {
           requireValue(routeSteps.indexOf(p.step) === routeSteps.indexOf(route.status)+1 && routeSteps.includes(p.step),'Etapa de entrega inválida.');
-          tx.update(routeRef,{status:p.step,updatedAt:timestamp});
+          const routeUpdate = {status:p.step,updatedAt:timestamp};
+          if (route.simulated && p.step === 'Em Rota') {
+            const km = 111 * Math.hypot(route.destLat-route.originLat,
+              (route.destLng-route.originLng)*Math.cos(route.originLat*Math.PI/180));
+            if (Number.isFinite(km)) routeUpdate.remainingTime = Math.max(1,Math.ceil(km*3))+' min';
+          }
+          tx.update(routeRef,routeUpdate);
           if (p.step === 'Em Rota') tx.update(orderRef,{status:'EM ENTREGA'});
           if (p.step === 'Pedido Entregue') {
             tx.update(orderRef,{status:'FECHADO',deliveredAt:timestamp});
@@ -196,12 +207,12 @@ export const readWorkQueue = onCall(async ({auth}) => {
     const orders=await tenant.collection('deliveryOrders').where('status','in',['PEDIDO GERADO','PRODUÇÃO','PRONTO']).get();
     return orders.docs.map(doc=>({id:doc.id,status:doc.get('status'),items:(doc.get('items') || []).map(i=>({
       name:i.productName,quantity:i.quantity,size:i.selectedSize,notes:i.observation || '',remove:i.removedItems || [],
-      extras:(i.selectedAddons || []).map(a=>a.name) }))}));
+      extras:[...(i.selectedAddons || []),...(i.selectedUtensils || [])].map(a=>a.name) }))}));
   }
   const routes=await tenant.collection('routes').where('courierId','==',id(auth.token.courierId)).get();
   return Promise.all(routes.docs.filter(r=>r.get('status')!=='Pedido Entregue').map(async route=>{
     const order=await tenant.collection('deliveryOrders').doc(id(route.get('orderId'))).get();
     const address=order.get('address');
-    return {id:order.id,status:route.get('status'),address:[address.street,address.number,address.neighborhood].filter(Boolean).join(', ')};
+    return {id:order.id,status:route.get('status'),shareContact:route.get('shareContact') === true,address:[address.street,address.number,address.neighborhood].filter(Boolean).join(', ')};
   }));
 });

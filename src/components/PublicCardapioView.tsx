@@ -66,19 +66,25 @@ export default function PublicCardapioView() {
 
   const total = subtotal + deliveryFee;
 
-  const handleAddProduct = (product: ProductDigitalMenu) => {
-    const baseSize = product.tamanhos?.[0];
+  const handleAddProduct = (product: ProductDigitalMenu, event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const choices = new FormData(event.currentTarget);
+    const baseSize = product.tamanhos?.find(size => size.label === choices.get('size'));
+    const selectedAddons = (product.adicionais || []).filter(option => choices.getAll('addon').includes(option.id));
+    const selectedUtensils = (product.utensilios || []).filter(option => choices.getAll('utensil').includes(option.id));
+    const quantity = Number(choices.get('quantity'));
+    const basePrice = baseSize?.price ?? product.price;
+    const unitCents = [...selectedAddons,...selectedUtensils].reduce((sum,o)=>sum+Math.round(o.price*100),Math.round(basePrice*100));
 
     const item: DeliveryOrderItem = {
       productId: product.id,
       productName: product.name,
       selectedSize: baseSize?.label || 'Único',
       selectedSizePrice: baseSize?.price ?? product.price,
-      selectedAddons: [],
-      removedItems: [],
-      selectedUtensils: [],
-      quantity: 1,
-      subtotal: baseSize?.price ?? product.price,
+      selectedAddons, selectedUtensils, quantity,
+      removedItems: choices.getAll('remove').map(String),
+      observation: String(choices.get('note') || '').trim(),
+      subtotal: unitCents * quantity / 100,
     };
 
     setBasket((prev) => [...prev, item]);
@@ -94,7 +100,8 @@ export default function PublicCardapioView() {
     if (!menu || !accepting || !basket.length || busy) return;
     setBusy(true); setError('');
     const payload = { menuId, tenantId, name: customerName, phone: customerPhone, street, number, neighborhood, complement, paymentMethod,
-      expectedTotalCents: Math.round(total * 100), items: basket.map(({ productId, selectedSize, quantity }) => ({ productId, selectedSize, quantity })) };
+      expectedTotalCents: Math.round(total * 100), items: basket.map(i => ({ productId:i.productId, selectedSize:i.selectedSize, quantity:i.quantity,
+        addonIds:i.selectedAddons.map(o=>o.id), utensilIds:i.selectedUtensils.map(o=>o.id), removedItems:i.removedItems, observation:i.observation })) };
     const signature = JSON.stringify(payload);
     if (signature !== request.current.signature) request.current = { signature, id: crypto.randomUUID() };
     try {
@@ -165,7 +172,7 @@ export default function PublicCardapioView() {
             </h2>
 
             {menuProducts.map((product) => (
-              <div
+              <form onSubmit={event=>handleAddProduct(product,event)}
                 key={product.id}
                 className="bg-white border border-slate-200 rounded-2xl p-3 flex gap-3 shadow-sm"
               >
@@ -181,17 +188,25 @@ export default function PublicCardapioView() {
                     {product.description}
                   </p>
                   <p className="text-sm font-bold text-emerald-600 mt-2">
-                    R$ {product.price.toFixed(2)}
+                    R$ {(product.tamanhos?.[0]?.price ?? product.price).toFixed(2)}
                   </p>
+                  <details className="mt-2 text-sm"><summary className="cursor-pointer">Personalizar item</summary>
+                    <div className="grid gap-2 py-2">
+                      {!!product.tamanhos?.length && <label>Tamanho <select name="size">{product.tamanhos.map(s=><option key={s.label} value={s.label}>{s.label} · R$ {s.price.toFixed(2)}</option>)}</select></label>}
+                      {([['addon',product.adicionais],['utensil',product.utensilios]] as const).map(([group,options])=>(options || []).map(o=><label key={group+o.id}><input type="checkbox" name={group} value={o.id}/> {o.name} · R$ {o.price.toFixed(2)}</label>))}
+                      {(product.naoMandar || []).map(o=><label key={o}><input type="checkbox" name="remove" value={o}/> {o}</label>)}
+                      <label>Quantidade <input className="w-16 border rounded" type="number" name="quantity" min="1" max="99" defaultValue="1" required/></label>
+                      <label>Observação <textarea className="w-full border rounded" name="note" maxLength={300}/></label>
+                    </div></details>
                 </div>
 
                 <button
-                  disabled={!accepting} onClick={() => handleAddProduct(product)}
+                  disabled={!accepting} type="submit" aria-label={'Adicionar '+product.name}
                   className="w-9 h-9 rounded-xl bg-emerald-500 text-white flex items-center justify-center shrink-0 self-center"
                 >
                   <Plus className="w-4 h-4" />
                 </button>
-              </div>
+              </form>
             ))}
           </div>
         )}
@@ -206,6 +221,11 @@ export default function PublicCardapioView() {
               <ChevronLeft className="w-4 h-4" />
               Voltar ao cardápio
             </button>
+            <section className="bg-white rounded-2xl border p-4 space-y-2"><h2 className="font-bold">Seu pedido</h2>
+              {basket.map((i,index)=><div key={index}><strong>{i.quantity} × {i.productName} ({i.selectedSize}) · R$ {i.subtotal.toFixed(2)}</strong>
+                <p>{[...i.selectedAddons.map(o=>o.name),...i.selectedUtensils.map(o=>o.name),...i.removedItems,i.observation].filter(Boolean).join(' · ')}</p>
+                <button type="button" onClick={()=>{handleRemoveItem(index);if(basket.length===1)setStep('browse');}}>Remover item</button></div>)}
+              <p>Entrega · R$ {deliveryFee.toFixed(2)}</p><strong>Total · R$ {total.toFixed(2)}</strong></section>
 
             <div className="bg-white rounded-2xl border p-4 space-y-3">
               <h2 className="font-bold text-lg">Dados para entrega</h2>

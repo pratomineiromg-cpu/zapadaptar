@@ -9,6 +9,14 @@ test('Preços do catálogo em centavos; item e quantidade validados', () => {
   assert.equal(priceBasket(items, products, 5).totalCents, 5300);
   assert.throws(()=>priceBasket([{...items[0],quantity:0}],products,5));
   assert.throws(()=>priceBasket([{...items[0],selectedSize:'G'}],products,5));
+  const customized = {...products[0],adicionais:[{id:'ovo',name:'Ovo',price:2.55}],
+    utensilios:[{id:'garfo',name:'Garfo',price:0.1}],naoMandar:['Cebola']};
+  const selection = {...items[0],addonIds:['ovo'],utensilIds:['garfo'],removedItems:['Cebola'],observation:' Separar '};
+  const result = priceBasket([selection],[customized],5);
+  assert.equal(result.totalCents,5830);
+  assert.equal(result.items[0].observation,'Separar');
+  assert.throws(()=>priceBasket([{...selection,addonIds:['ovo','ovo']}],[customized],5));
+  assert.throws(()=>priceBasket([{...selection,utensilIds:['outro']}],[customized],5));
 });
 
 test('Checkout, separação de empresas, crédito de cartão, logística e fechamento em transações locais',async () => {
@@ -24,12 +32,15 @@ test('Checkout, separação de empresas, crédito de cartão, logística e fecha
     ref('cardapios','almoco').set({name:'Almoço',active:true,productIds:['m']}),
     ref('productsDigitalMenu','m').set({name:'Marmita',price:24,tamanhos:[]}),
     ref('settings','default').set({operation:{isOpen:true,acceptPublicOrders:true},delivery:{defaultFee:5}}),
-    ref('couriers','bike').set({name:'Rita Silva',status:'Disponível',activeOrders:[]})]);
+    ref('couriers','bike').set({name:'Rita Silva',phone:'(31) 90000-0001',status:'Disponível',activeOrders:[]})]);
   const data={requestId:randomUUID(),tenantId,menuId:'almoco',name:'Cliente de teste',phone:'11900000000',
     street:'Rua de teste',number:'1',neighborhood:'Centro',paymentMethod:'Cartão',expectedTotalCents:5300,
     items:[{productId:'m',quantity:2,selectedSize:'Único'}]};
   const [a,b]=await Promise.all([createMenuOrder.run({data}),createMenuOrder.run({data})]);
   assert.deepEqual(a,b);
+  const track = () => trackOrder.run({data:{id:a.trackingToken}});
+  assert.deepEqual((await track()).timeline.map(e=>e.label),['Pedido recebido']);
+  await assert.rejects(trackOrder.run({data:{id:a.orderId}}),{code:'not-found'});
   await ref('cardapios','almoco').update({active:false});
   assert.deepEqual(await createMenuOrder.run({data}),a);
   await assert.rejects(createMenuOrder.run({data:{...data,requestId:randomUUID()}}));
@@ -39,11 +50,31 @@ test('Checkout, separação de empresas, crédito de cartão, logística e fecha
   await command('prepare',{orderId:a.orderId,status:'PRODUÇÃO'},'cozinha');
   await command('prepare',{orderId:a.orderId,status:'PRONTO'},'cozinha');
   await command('assign',{orderId:a.orderId,courierId:'bike'});
+  const consent = (courierId,enabled) => operate.run({auth:{uid:'rider',token:{tenantId,role:'entregador',courierId}},
+    data:{action:'shareContact',requestId:randomUUID(),payload:{orderId:a.orderId,enabled}}});
+  await assert.rejects(consent('other',true));
+  await consent('bike',true);
+  assert.equal((await track()).phone,null);
   assert.equal((await ref('deliveryOrders',a.orderId).get()).get('status'),'PRONTO');
   for (const step of ['Entregador Aceitou','Indo Retirada','Pedido Coletado','Em Rota','Pedido Entregue']) {
     await command('routeStep',{orderId:a.orderId,step});
+    if (step === 'Em Rota') {
+      const active = await track();
+      assert.equal(active.phone,'+5531900000001');
+      assert.match(active.eta,/^\d+ min$/);
+      assert.equal(active.simulated,true);
+      await consent('bike',false);
+      assert.equal((await track()).phone,null);
+      await consent('bike',true);
+    }
   }
-  assert.equal((await trackOrder.run({data:{id:a.trackingToken}})).routeStatus,'Pedido Entregue');
+  const finished = await track();
+  assert.equal(finished.routeStatus,'Pedido Entregue');
+  assert.equal(finished.phone,null);
+  assert.equal(finished.eta,null);
+  assert.deepEqual(finished.timeline.map(e=>e.label),['Pedido recebido','Em preparo','Pronto para entrega',
+    'Entregador atribuído','Entregador aceitou','Indo para retirada','Pedido coletado','Em rota','Pedido entregue']);
+  await assert.rejects(consent('bike',true));
   assert.equal((await ref('orders',a.orderId).get()).get('status'),'Pendente');
   const sessionId=randomUUID();
   await assert.rejects(command('cashOpen',{cents:10000},'cozinha'));
